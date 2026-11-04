@@ -1,0 +1,8 @@
+.DS_Store
+*.fasl
+
+# prywatne materiały prowadzącego
+.local/
+
+# wyniki uruchomień (tworzone automatycznie przez engine/run.lisp)
+results/

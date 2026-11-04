@@ -1,0 +1,12 @@
+{
+  // Rozszerzenie PDDL (jan-dolejsi.pddl): kolorowanie składni, konspekt, podpowiedzi.
+  // Wyłączone: formatowanie (nie zmienia starych plików), przycisk zewnętrznego
+  // plannera online (nie zna dialektu SGP) oraz liczniki użyć predykatów
+  // wyświetlane obok :predicates (3👁 odczyty, 1☑ ustawienia, 1☒ usunięcia).
+  "pddl.showPlannerInStatusBar": false,
+  "pddl.formatter": false,
+  "pddl.modelHierarchy": false,
+  "[pddl]": { "editor.formatOnSave": false },
+  "files.encoding": "utf8",
+  "files.exclude": { "**/.DS_Store": true }
+}

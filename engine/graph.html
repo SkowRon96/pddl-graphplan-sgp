@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Graf planowania</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1d2330; --muted: #6b7280; --line: #d6dae1;
+    --prop: #e8f0fe; --prop-b: #4a74c9; --act: #fff4e0; --act-b: #c98a1d;
+    --plan: #d9f5df; --plan-b: #1f8a3b; --mutex: #d43c3c; --edge: #9aa3b2;
+    --pre: #4a74c9; --eff: #1f8a3b; --panel: #f6f7f9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15181e; --fg: #e5e7eb; --muted: #9ca3af; --line: #343a46;
+      --prop: #1d2a44; --prop-b: #7ea2ef; --act: #3a2e17; --act-b: #e0a94a;
+      --plan: #163a22; --plan-b: #5fd07f; --mutex: #f06b6b; --edge: #5b6474;
+      --pre: #7ea2ef; --eff: #5fd07f; --panel: #1c2028;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 16px 20px 8px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .meta { color: var(--muted); }
+  .bar { display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+         padding: 8px 20px; background: var(--panel); border-top: 1px solid var(--line);
+         border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 2; }
+  .bar label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; margin-right: 12px; color: var(--muted); }
+  .sw { width: 14px; height: 10px; border-radius: 2px; border: 1.5px solid; display: inline-block; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 0; }
+  #wrap { overflow: auto; min-height: 70vh; border-right: 1px solid var(--line); }
+  aside { padding: 12px 16px; font-size: 13px; overflow: auto; max-height: calc(100vh - 120px); position: sticky; top: 45px; }
+  aside h2 { font-size: 14px; margin: 14px 0 6px; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 3px 5px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 600; }
+  ol { padding-left: 22px; margin: 4px 0; }
+  ol li { margin-bottom: 4px; }
+  ol.deg li::marker { content: counter(list-item) "°  "; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+  .skip { color: var(--muted); }
+  svg text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; fill: var(--fg); }
+  .n rect { stroke-width: 1.2; }
+  .n.p rect { fill: var(--prop); stroke: var(--prop-b); }
+  .n.a rect { fill: var(--act); stroke: var(--act-b); }
+  .n.a.noop rect { fill: var(--bg); stroke: var(--edge); stroke-dasharray: 3 2; }
+  .n.a.plan rect { fill: var(--plan); stroke: var(--plan-b); stroke-width: 2.2; }
+  .n.dim { opacity: .18; }
+  .n.focus rect { stroke-width: 2.6; }
+  .e { stroke: var(--edge); stroke-width: 1; fill: none; opacity: .55; }
+  .e.pre.hl { stroke: var(--pre); opacity: 1; stroke-width: 1.8; }
+  .e.eff.hl { stroke: var(--eff); opacity: 1; stroke-width: 1.8; }
+  .e.dim { opacity: .06; }
+  .m { stroke: var(--mutex); stroke-width: 1; fill: none; stroke-dasharray: 4 3; opacity: .7; }
+  .m.dim { opacity: .05; }
+  .colh { fill: var(--muted); font-family: system-ui, sans-serif; font-size: 12px; font-weight: 600; }
+  .info { color: var(--muted); margin-top: 6px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } aside { position: static; max-height: none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Graf planowania</h1>
+  <div class="meta" id="meta"></div>
+</header>
+<div class="bar">
+  <label title="Akcja typu no-operation (no-op): przenosi propozycję bez zmian na następny poziom grafu"><input type="checkbox" id="optNoop"> pokaż akcje no-op</label>
+  <label><input type="checkbox" id="optMutex" checked> pokaż wzajemne wykluczania (mutex)</label>
+  <label><input type="checkbox" id="optPlan"> tylko rozwiązanie</label>
+  <span class="legend">
+    <span><i class="sw" style="background:var(--prop);border-color:var(--prop-b)"></i>propozycja</span>
+    <span><i class="sw" style="background:var(--act);border-color:var(--act-b)"></i>akcja</span>
+    <span><i class="sw" style="border-color:var(--edge);border-style:dashed"></i>akcja no-op</span>
+    <span><i class="sw" style="background:var(--plan);border-color:var(--plan-b)"></i>akcja rozwiązania</span>
+    <span><i class="sw" style="border-color:var(--mutex);border-style:dashed"></i>wzajemne wykluczanie</span>
+  </span>
+  <span class="info">Najedź na węzeł: warunek stosowalności (niebieski), efekt (zielony), wykluczenia (czerwone).</span>
+</div>
+<main>
+  <div id="wrap"><svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg></div>
+  <aside>
+    <h2>Rozwiązanie</h2><div id="plan"></div>
+    <h2>Przebieg rozwiązywania</h2><div id="levels"></div>
+    <h2>Czasy</h2><div id="times"></div>
+  </aside>
+</main>
+<script>
+const DATA = /*__DATA__*/null;
+const R = DATA.result, G = DATA.graph;
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const human = ms => ms < 1 ? `${ms.toFixed(3)} ms` : ms < 1000 ? `${ms.toFixed(1)} ms` : ms < 60000 ? `${(ms / 1000).toFixed(2)} s` : `${Math.floor(ms / 60000)} min ${Math.round(ms % 60000 / 1000)} s`;
+
+$('title').textContent = `${R.problem} — graf planowania (${R.planner.toUpperCase()})`;
+document.title = `Graf ${R.problem}`;
+$('meta').textContent = `${R.file} · domena ${R.domain} · ` +
+  (R.solved ? `rozwiązanie: ${R.plan_steps} kroków, ${R.plan_actions} akcji` : 'brak rozwiązania') +
+  ` · kroki algorytmu: ${R.algorithm_steps} · ${human(R.time_ms.total)}` +
+  (R.worlds ? ` · światy: ${R.worlds}` : '');
+
+// --- panel boczny
+$('plan').innerHTML = R.plan.length ? '<ol class="deg">' + R.plan.map(s => '<li>' + s.actions.map(a =>
+  `<code>${esc(a.action)}</code>` + (a.skip_in_worlds ? ` <span class="skip">pomiń w ${a.skip_in_worlds.join(', ')}</span>` : '')
+).join('<br>') + '</li>').join('') + '</ol>' : '<p class="skip">brak rozwiązania</p>';
+$('levels').innerHTML = '<table><tr><th>krok</th><th>graph-size<br>(akcje, propozycje)</th><th>mutex-count<br>(akcje, propozycje)</th></tr>' +
+  R.steps.map(s => `<tr><td>${s.step}</td><td>(${s.graph_size.actions}, ${s.graph_size.propositions})</td><td>(${s.mutex_count.actions}, ${s.mutex_count.propositions})</td></tr>`).join('') + '</table>';
+$('times').innerHTML = '<table><tr><th>krok</th><th>time-expansion</th><th>time-bc</th><th>time-mutex</th></tr>' +
+  R.steps.map(s => `<tr><td>${s.step}</td><td>${human(s.time_expansion_ms)}</td><td>${human(s.time_bc_ms)}</td><td>${human(s.time_mutex_ms)}</td></tr>`).join('') +
+  `<tr><th>Σ</th><th>${human(R.time_ms.expansion)}</th><th>${human(R.time_ms.bc)}</th><th>${human(R.time_ms.mutex)}</th></tr></table>`;
+
+// --- rysunek
+const NS = 'http://www.w3.org/2000/svg';
+const NODE_H = 20, GAP = 6, TOP = 34, PAD = 10, CH = 6.8;
+const svg = $('svg');
+const byId = new Map();
+G.forEach(l => { l.props.forEach(p => byId.set(p.id, {...p, kind: 'p', level: l.level}));
+                 l.actions.forEach(a => byId.set(a.id, {...a, kind: 'a', level: l.level})); });
+
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+const label = n => n.label + (n.ctx ? ` {${n.ctx}}` : '');
+
+function draw() {
+  const showNoop = $('optNoop').checked, showMutex = $('optMutex').checked, onlyPlan = $('optPlan').checked;
+  svg.innerHTML = '';
+  // które węzły są widoczne
+  const visible = new Set();
+  G.forEach(l => l.actions.forEach(a => {
+    if ((a.noop && !showNoop) || (onlyPlan && !a.plan)) return;
+    visible.add(a.id);
+  }));
+  G.forEach(l => l.props.forEach(p => {
+    if (!onlyPlan) { visible.add(p.id); return; }
+  }));
+  if (onlyPlan) {
+    G.forEach(l => l.actions.forEach(a => { if (visible.has(a.id)) { a.pre.forEach(i => visible.add(i)); a.eff.forEach(i => visible.add(i)); } }));
+    // cele i stan początkowy zawsze
+    G[0].props.forEach(p => visible.add(p.id));
+  }
+  // kolumny jak w PDDL.pdf: poziom 0 (propozycje), 1 (akcje), 2 (propozycje), ...
+  const cols = [];
+  G.forEach(l => {
+    if (l.level > 0) cols.push({ title: `Poziom ${2 * l.level - 1}: akcje (krok ${l.level})`, nodes: l.actions.filter(a => visible.has(a.id)) });
+    cols.push({ title: `Poziom ${2 * l.level}: propozycje` + (l.level === 0 ? ' (stan początkowy)' : ''), nodes: l.props.filter(p => visible.has(p.id)) });
+  });
+  const pos = new Map();
+  let x = PAD, maxY = 0;
+  cols.forEach(c => {
+    const w = Math.max(60, c.title.length * 7.2, ...c.nodes.map(n => label(n).length * CH + 14));
+    c.x = x; c.w = w;
+    el('text', { x: x, y: 18, class: 'colh' }, svg).textContent = c.title;
+    c.nodes.forEach((n, i) => {
+      const y = TOP + i * (NODE_H + GAP);
+      pos.set(n.id, { x, y, w });
+      maxY = Math.max(maxY, y + NODE_H);
+    });
+    x += w + 70;
+  });
+  svg.setAttribute('width', x + PAD);
+  svg.setAttribute('height', maxY + PAD + 20);
+
+  const edges = el('g', {}, svg), mutexes = el('g', {}, svg), nodes = el('g', {}, svg);
+  const edgeEls = [], mutexEls = [], nodeEls = new Map();
+  const curve = (x1, y1, x2, y2) => { const dx = (x2 - x1) / 2; return `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`; };
+
+  G.forEach(l => l.actions.forEach(a => {
+    if (!visible.has(a.id)) return;
+    const pa = pos.get(a.id);
+    a.pre.forEach(i => { const p = pos.get(i); if (!p) return;
+      edgeEls.push({ a: a.id, b: i, kind: 'pre', e: el('path', { d: curve(p.x + p.w, p.y + NODE_H / 2, pa.x, pa.y + NODE_H / 2), class: 'e pre' }, edges) }); });
+    a.eff.forEach(i => { const p = pos.get(i); if (!p) return;
+      edgeEls.push({ a: a.id, b: i, kind: 'eff', e: el('path', { d: curve(pa.x + pa.w, pa.y + NODE_H / 2, p.x, p.y + NODE_H / 2), class: 'e eff' }, edges) }); });
+  }));
+
+  if (showMutex) {
+    const seen = new Set();
+    byId.forEach(n => (n.mutex || []).forEach(m => {
+      const key = n.id < m ? n.id + '-' + m : m + '-' + n.id;
+      if (seen.has(key)) return; seen.add(key);
+      const p1 = pos.get(n.id), p2 = pos.get(m);
+      if (!p1 || !p2) return;
+      const y1 = p1.y + NODE_H / 2, y2 = p2.y + NODE_H / 2;
+      const bulge = Math.min(60, 8 + Math.abs(y2 - y1) / 6);
+      mutexEls.push({ a: n.id, b: m, e: el('path', { d: `M${p1.x},${y1} C${p1.x - bulge},${y1} ${p2.x - bulge},${y2} ${p2.x},${y2}`, class: 'm' }, mutexes) });
+    }));
+  }
+
+  pos.forEach((p, id) => {
+    const n = byId.get(id);
+    const g = el('g', { class: `n ${n.kind}` + (n.noop ? ' noop' : '') + (n.plan ? ' plan' : ''), transform: `translate(${p.x},${p.y})` }, nodes);
+    el('rect', { width: p.w, height: NODE_H, rx: n.kind === 'p' ? 10 : 3 }, g);
+    el('text', { x: 7, y: 14 }, g).textContent = label(n);
+    el('title', {}, g).textContent = label(n);
+    nodeEls.set(id, g);
+    g.addEventListener('mouseenter', () => focus(id));
+    g.addEventListener('mouseleave', () => focus(null));
+  });
+
+  function focus(id) {
+    if (id === null) {
+      nodeEls.forEach(g => g.classList.remove('dim', 'focus'));
+      edgeEls.forEach(x => x.e.classList.remove('dim', 'hl'));
+      mutexEls.forEach(x => x.e.classList.remove('dim'));
+      return;
+    }
+    const keep = new Set([id]);
+    edgeEls.forEach(x => { const on = x.a === id || x.b === id; x.e.classList.toggle('hl', on); x.e.classList.toggle('dim', !on); if (on) { keep.add(x.a); keep.add(x.b); } });
+    mutexEls.forEach(x => { const on = x.a === id || x.b === id; x.e.classList.toggle('dim', !on); if (on) { keep.add(x.a); keep.add(x.b); } });
+    nodeEls.forEach((g, nid) => { g.classList.toggle('dim', !keep.has(nid)); g.classList.toggle('focus', nid === id); });
+  }
+}
+['optNoop', 'optMutex', 'optPlan'].forEach(i => $(i).addEventListener('change', draw));
+draw();
+</script>
+</body>
+</html>

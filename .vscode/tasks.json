@@ -1,0 +1,63 @@
+{
+  // Wszystkie uruchomienia plannera. Typ "process" uruchamia sbcl bez powłoki,
+  // więc konfiguracja jest taka sama na Windows, macOS i Linuksie.
+  // Wyniki trafiają do results/<nazwa>.json (oraz .html dla grafu).
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "SGP: planuj",
+      "detail": "Aktywny plik .pddl -> plan + statystyki w results/<nazwa>.json",
+      "type": "process",
+      "command": "sbcl",
+      "args": ["--script", "${workspaceFolder}/engine/run.lisp", "${file}", "${input:problem}",
+               "--name", "${input:name}", "--levels", "${input:levels}"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": { "kind": "build", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "SGP: planuj + graf",
+      "detail": "Jak wyżej + rysunek grafu planowania results/<nazwa>.html (otwiera się w przeglądarce)",
+      "type": "process",
+      "command": "sbcl",
+      "args": ["--script", "${workspaceFolder}/engine/run.lisp", "${file}", "${input:problem}",
+               "--name", "${input:name}", "--levels", "${input:levels}", "--graph"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "SGP: lista problemów",
+      "detail": "Problemy zdefiniowane w aktywnym pliku",
+      "type": "process",
+      "command": "sbcl",
+      "args": ["--script", "${workspaceFolder}/engine/run.lisp", "${file}", "--list"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "problem",
+      "type": "promptString",
+      "description": "Nazwa problemu z (define (problem X) ...). Puste = pierwszy problem w pliku.",
+      "default": ""
+    },
+    {
+      "id": "name",
+      "type": "promptString",
+      "description": "Nazwa wyniku (results/<nazwa>.json). Puste = <problem>-<data>-<godzina>.",
+      "default": ""
+    },
+    {
+      "id": "levels",
+      "type": "promptString",
+      "description": "Maksymalna liczba kroków algorytmu (= maksymalna liczba kroków rozwiązania).",
+      "default": "20"
+    }
+  ]
+}
