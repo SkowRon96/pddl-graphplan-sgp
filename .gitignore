@@ -2,7 +2,7 @@
 *.fasl
 
 # prywatne materiały prowadzącego
-.local/
+local_docs/
 
 # wyniki uruchomień (tworzone automatycznie przez engine/run.lisp)
 results/
