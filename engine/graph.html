@@ -32,7 +32,15 @@
   .legend span { display: inline-flex; align-items: center; gap: 5px; margin-right: 12px; color: var(--muted); }
   .sw { width: 14px; height: 10px; border-radius: 2px; border: 1.5px solid; display: inline-block; }
   main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 0; }
-  #wrap { overflow: auto; min-height: 70vh; border-right: 1px solid var(--line); }
+  #wrap { overflow: auto; height: calc(100vh - 150px); min-height: 320px; border-right: 1px solid var(--line); cursor: grab; position: relative; }
+  #wrap.drag { cursor: grabbing; user-select: none; }
+  .zoom { display: inline-flex; align-items: center; gap: 4px; }
+  .zoom button { font: inherit; min-width: 30px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 6px;
+                 background: var(--bg); color: var(--fg); cursor: pointer; }
+  .zoom button:hover { border-color: var(--muted); }
+  #zoomVal { min-width: 46px; text-align: center; color: var(--muted); font-variant-numeric: tabular-nums; }
+  svg.compact text { font-size: 9px; }
+  svg.compact .colh { font-size: 10px; }
   aside { padding: 12px 16px; font-size: 13px; overflow: auto; max-height: calc(100vh - 120px); position: sticky; top: 45px; }
   aside h2 { font-size: 14px; margin: 14px 0 6px; }
   table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
@@ -72,6 +80,11 @@
   <label title="Akcja typu no-operation (no-op): przenosi propozycję bez zmian na następny poziom grafu"><input type="checkbox" id="optNoop"> pokaż akcje no-op</label>
   <label><input type="checkbox" id="optMutex" checked> pokaż wzajemne wykluczania (mutex)</label>
   <label><input type="checkbox" id="optPlan"> tylko rozwiązanie</label>
+  <label title="Mniejsze węzły i skrócone etykiety (pełna nazwa po najechaniu myszą)"><input type="checkbox" id="optCompact"> wersja kompaktowa</label>
+  <span class="zoom" title="Ctrl/Cmd + kółko myszy: przybliżanie w miejscu kursora; klawisze + − 0; przeciąganie tła: przesuwanie">
+    <button id="zOut" aria-label="Oddal">−</button><span id="zoomVal">100%</span><button id="zIn" aria-label="Przybliż">+</button>
+    <button id="z100">100%</button><button id="zFit">Dopasuj</button>
+  </span>
   <span class="legend">
     <span><i class="sw" style="background:var(--prop);border-color:var(--prop-b)"></i>propozycja</span>
     <span><i class="sw" style="background:var(--act);border-color:var(--act-b)"></i>akcja</span>
@@ -115,7 +128,13 @@ $('times').innerHTML = '<table><tr><th>krok</th><th>time-expansion</th><th>time-
 
 // --- rysunek
 const NS = 'http://www.w3.org/2000/svg';
-const NODE_H = 20, GAP = 6, TOP = 34, PAD = 10, CH = 6.8;
+const MODES = {
+  normal:  { NODE_H: 20, GAP: 6, TOP: 34, COLGAP: 70, CH: 6.8, TX: 7, TY: 14, MAXL: Infinity, TITLE: 7.2 },
+  compact: { NODE_H: 13, GAP: 2, TOP: 26, COLGAP: 28, CH: 5.6, TX: 4, TY: 9.5, MAXL: 22, TITLE: 6.0 },
+};
+let M = MODES.normal;
+const PAD = 10;
+let zoom = 1, contentW = 0, contentH = 0, firstDraw = true;
 const svg = $('svg');
 const byId = new Map();
 G.forEach(l => { l.props.forEach(p => byId.set(p.id, {...p, kind: 'p', level: l.level}));
@@ -128,10 +147,15 @@ function el(tag, attrs, parent) {
   return e;
 }
 const label = n => n.label + (n.ctx ? ` {${n.ctx}}` : '');
+const shown = n => { const s = label(n); return s.length > M.MAXL ? s.slice(0, M.MAXL - 1) + '…' : s; };
 
 function draw() {
   const showNoop = $('optNoop').checked, showMutex = $('optMutex').checked, onlyPlan = $('optPlan').checked;
+  M = $('optCompact').checked ? MODES.compact : MODES.normal;
+  svg.classList.toggle('compact', M === MODES.compact);
   svg.innerHTML = '';
+  const vp = el('g', { id: 'viewport' }, svg);
+  const { NODE_H, GAP, TOP, COLGAP, CH, TX, TY } = M;
   // które węzły są widoczne
   const visible = new Set();
   G.forEach(l => l.actions.forEach(a => {
@@ -149,26 +173,27 @@ function draw() {
   // kolumny jak w PDDL.pdf: poziom 0 (propozycje), 1 (akcje), 2 (propozycje), ...
   const cols = [];
   G.forEach(l => {
-    if (l.level > 0) cols.push({ title: `Poziom ${2 * l.level - 1}: akcje (krok ${l.level})`, nodes: l.actions.filter(a => visible.has(a.id)) });
-    cols.push({ title: `Poziom ${2 * l.level}: propozycje` + (l.level === 0 ? ' (stan początkowy)' : ''), nodes: l.props.filter(p => visible.has(p.id)) });
+    const c = M === MODES.compact;
+    if (l.level > 0) cols.push({ title: c ? `Poz. ${2 * l.level - 1}: akcje` : `Poziom ${2 * l.level - 1}: akcje (krok ${l.level})`, nodes: l.actions.filter(a => visible.has(a.id)) });
+    cols.push({ title: (c ? `Poz. ${2 * l.level}: propozycje` : `Poziom ${2 * l.level}: propozycje`) + (l.level === 0 && !c ? ' (stan początkowy)' : ''), nodes: l.props.filter(p => visible.has(p.id)) });
   });
   const pos = new Map();
   let x = PAD, maxY = 0;
   cols.forEach(c => {
-    const w = Math.max(60, c.title.length * 7.2, ...c.nodes.map(n => label(n).length * CH + 14));
+    const w = Math.max(50, c.title.length * M.TITLE, ...c.nodes.map(n => shown(n).length * CH + 2 * TX));
     c.x = x; c.w = w;
-    el('text', { x: x, y: 18, class: 'colh' }, svg).textContent = c.title;
+    el('text', { x: x, y: TOP - 14, class: 'colh' }, vp).textContent = c.title;
     c.nodes.forEach((n, i) => {
       const y = TOP + i * (NODE_H + GAP);
       pos.set(n.id, { x, y, w });
       maxY = Math.max(maxY, y + NODE_H);
     });
-    x += w + 70;
+    x += w + COLGAP;
   });
-  svg.setAttribute('width', x + PAD);
-  svg.setAttribute('height', maxY + PAD + 20);
+  contentW = x - COLGAP + 2 * PAD;
+  contentH = maxY + PAD + 10;
 
-  const edges = el('g', {}, svg), mutexes = el('g', {}, svg), nodes = el('g', {}, svg);
+  const edges = el('g', {}, vp), mutexes = el('g', {}, vp), nodes = el('g', {}, vp);
   const edgeEls = [], mutexEls = [], nodeEls = new Map();
   const curve = (x1, y1, x2, y2) => { const dx = (x2 - x1) / 2; return `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`; };
 
@@ -197,8 +222,8 @@ function draw() {
   pos.forEach((p, id) => {
     const n = byId.get(id);
     const g = el('g', { class: `n ${n.kind}` + (n.noop ? ' noop' : '') + (n.plan ? ' plan' : ''), transform: `translate(${p.x},${p.y})` }, nodes);
-    el('rect', { width: p.w, height: NODE_H, rx: n.kind === 'p' ? 10 : 3 }, g);
-    el('text', { x: 7, y: 14 }, g).textContent = label(n);
+    el('rect', { width: p.w, height: NODE_H, rx: n.kind === 'p' ? NODE_H / 2 : 3 }, g);
+    el('text', { x: TX, y: TY }, g).textContent = shown(n);
     el('title', {}, g).textContent = label(n);
     nodeEls.set(id, g);
     g.addEventListener('mouseenter', () => focus(id));
@@ -217,8 +242,63 @@ function draw() {
     mutexEls.forEach(x => { const on = x.a === id || x.b === id; x.e.classList.toggle('dim', !on); if (on) { keep.add(x.a); keep.add(x.b); } });
     nodeEls.forEach((g, nid) => { g.classList.toggle('dim', !keep.has(nid)); g.classList.toggle('focus', nid === id); });
   }
+  if (firstDraw) { firstDraw = false; fit(); } else applyZoom();
 }
-['optNoop', 'optMutex', 'optPlan'].forEach(i => $(i).addEventListener('change', draw));
+
+// --- przybliżanie / oddalanie
+const wrap = $('wrap');
+const ZMIN = 0.1, ZMAX = 4;
+function applyZoom() {
+  $('viewport').setAttribute('transform', `scale(${zoom})`);
+  svg.setAttribute('width', Math.ceil(contentW * zoom));
+  svg.setAttribute('height', Math.ceil(contentH * zoom));
+  $('zoomVal').textContent = Math.round(zoom * 100) + '%';
+}
+// ustaw powiększenie z, zachowując w miejscu punkt (cx, cy) okna
+function setZoom(z, cx = wrap.clientWidth / 2, cy = wrap.clientHeight / 2) {
+  z = Math.min(ZMAX, Math.max(ZMIN, z));
+  const gx = (wrap.scrollLeft + cx) / zoom, gy = (wrap.scrollTop + cy) / zoom;
+  zoom = z;
+  applyZoom();
+  wrap.scrollLeft = gx * zoom - cx;
+  wrap.scrollTop = gy * zoom - cy;
+}
+function fit() {
+  zoom = Math.min(1, Math.max(ZMIN, Math.min((wrap.clientWidth - 4) / contentW, (wrap.clientHeight - 4) / contentH)));
+  applyZoom();
+  wrap.scrollLeft = 0; wrap.scrollTop = 0;
+}
+$('zIn').onclick = () => setZoom(zoom * 1.25);
+$('zOut').onclick = () => setZoom(zoom / 1.25);
+$('z100').onclick = () => setZoom(1);
+$('zFit').onclick = fit;
+wrap.addEventListener('wheel', e => {
+  if (!(e.ctrlKey || e.metaKey)) return;          // zwykłe kółko = przewijanie
+  e.preventDefault();
+  const r = wrap.getBoundingClientRect();
+  setZoom(zoom * Math.exp(-e.deltaY * 0.0015), e.clientX - r.left, e.clientY - r.top);
+}, { passive: false });
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === '+' || e.key === '=') setZoom(zoom * 1.25);
+  else if (e.key === '-' || e.key === '_') setZoom(zoom / 1.25);
+  else if (e.key === '0') fit();
+});
+// przesuwanie przez przeciąganie tła
+let drag = null;
+wrap.addEventListener('mousedown', e => {
+  if (e.button !== 0 || e.target.closest('.n')) return;
+  drag = { x: e.clientX, y: e.clientY, l: wrap.scrollLeft, t: wrap.scrollTop };
+  wrap.classList.add('drag');
+});
+window.addEventListener('mousemove', e => {
+  if (!drag) return;
+  wrap.scrollLeft = drag.l - (e.clientX - drag.x);
+  wrap.scrollTop = drag.t - (e.clientY - drag.y);
+});
+window.addEventListener('mouseup', () => { drag = null; wrap.classList.remove('drag'); });
+
+['optNoop', 'optMutex', 'optPlan', 'optCompact'].forEach(i => $(i).addEventListener('change', draw));
 draw();
 </script>
 </body>

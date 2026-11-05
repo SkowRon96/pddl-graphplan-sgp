@@ -39,9 +39,8 @@ potrzebne.**
 Następnie:
 
 1. W terminalu sprawdź `sbcl --version`. Powinno się pojawić np. `SBCL 2.x.y`.
-   - Windows: jeśli polecenie nie działa, dodaj katalog SBCL (zwykle
-     `C:\Program Files\Steel Bank Common Lisp`) do zmiennej `PATH`
-     i uruchom VS Code ponownie.
+   - Windows: jeśli polecenie nie działa, dodaj katalog SBCL do zmiennej
+     `PATH` (opis niżej: [Windows: dodanie SBCL do PATH](#windows-dodanie-sbcl-do-path)).
 2. W VS Code: **File → Open Folder…** i wybierz **cały folder repozytorium**.
    Bez tego zadania nie będą widoczne.
 3. Zainstaluj rekomendowane rozszerzenie **PDDL** (`jan-dolejsi.pddl`), które
@@ -54,6 +53,24 @@ Następnie:
 4. Test: otwórz `gripper-example.pddl`, naciśnij **Ctrl+Shift+B**
    (macOS: **Cmd+Shift+B**) i trzy razy Enter. W terminalu powinno
    pojawić się rozwiązanie problemu `gripper-1s` z 3 krokami.
+
+### Windows: dodanie SBCL do PATH
+
+1. Start → wpisz **zmienne środowiskowe** → **Edytuj zmienne środowiskowe
+   systemu** → **Zmienne środowiskowe…**
+
+   ![Właściwości systemu](docs/img/windows-path-1-wlasciwosci-systemu.png)
+
+2. **Zmienne użytkownika** → **Path** → **Edytuj…** → **Nowy** → **Przeglądaj…**
+
+   ![Edycja zmiennej Path](docs/img/windows-path-2-edycja-path.png)
+
+3. Wybierz `C:\Program Files\Steel Bank Common Lisp` → **OK** i zamknij
+   pozostałe okna przyciskiem **OK**.
+
+   ![Folder Steel Bank Common Lisp](docs/img/windows-path-3-folder-sbcl.png)
+
+4. Uruchom ponownie VS Code i sprawdź `sbcl --version`.
 
 ## 3. Zadania (taski) i skróty klawiszowe
 
