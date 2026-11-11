@@ -17,30 +17,24 @@
 
 (in-package :domains)
 
-;;;Propositions:
+;;; ----- Dziedzina sick-dom: dwie choroby, jedno badanie --------------
 ;;;
-;;;    I   Infected
-;;;    B   Blue
-;;;    D   Dangerous
+;;; Propozycje:
+;;;   (I1), (I2)  pacjent ma chorobę 1 / chorobę 2
+;;;   (B), (R)    wymaz zabarwił się na niebiesko (blue) / czerwono (red)
+;;;   (D)         stan groźny (dangerous) -- pacjent dostał zły lek
 ;;;
-;;;Actions:
-;;;    Stain
-;;;        eff: (when I B)
+;;; Akcje (bez warunków stosowalności):
+;;;   stain       barwienie wymazu:   (when (I1) (B)), (when (I2) (R))
+;;;   inspect     obserwacja koloru:  (observes (B)), (observes (R))   -- sensoryczna
+;;;   medicate-1  (when (I1) (not (I1)))  leczy chorobę 1,
+;;;               (when (not (I1)) (D))   ale bez choroby 1 szkodzi
+;;;   medicate-2  to samo dla choroby 2
 ;;;
-;;;    Inspect
-;;;        observe(B)
+;;; Cel: (and (not (I1)) (not (I2)) (not (D)))  -- pacjent wyleczony i bez szkody od leku
 ;;;
-;;;    Medicate
-;;;        eff: (when I !I)
-;;;             (when !I D)
-;;;
-;;;Initial Conditions:
-;;;    w1:       I, !B, !D
-;;;    
-;;;    w2:       !I, !B, !D
-;;;
-;;;Goal:
-;;;    !I ^ !D    
+;;; Rozwiązanie: stain, inspect, a potem tylko ten lek, który pasuje do
+;;; zaobserwowanego koloru (albo żaden, gdy wymaz się nie zabarwił).
 
 (define (domain sick-dom)
     (:requirements :conditional-effects)

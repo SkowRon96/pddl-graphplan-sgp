@@ -99,7 +99,7 @@
 <main>
   <div id="wrap"><svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg></div>
   <aside>
-    <h2>Rozwiązanie</h2><div id="plan"></div>
+    <h2 id="planTitle">Rozwiązanie</h2><div id="plan"></div>
     <h2>Przebieg rozwiązywania</h2><div id="levels"></div>
     <h2>Czasy</h2><div id="times"></div>
   </aside>
@@ -119,9 +119,20 @@ $('meta').textContent = `${R.file} · domena ${R.domain} · ` +
   (R.worlds ? ` · światy: ${R.worlds}` : '');
 
 // --- panel boczny
-$('plan').innerHTML = R.plan.length ? '<ol class="deg">' + R.plan.map(s => '<li>' + s.actions.map(a =>
-  `<code>${esc(a.action)}</code>` + (a.skip_in_worlds ? ` <span class="skip">pomiń w ${a.skip_in_worlds.join(', ')}</span>` : '')
-).join('<br>') + '</li>').join('') + '</ol>' : '<p class="skip">brak rozwiązania</p>';
+// rozwiązanie: całe (z „pomiń w światach”) albo dla wybranego świata
+function renderPlan(world) {
+  if (!R.plan.length) { $('plan').innerHTML = '<p class="skip">brak rozwiązania</p>'; return; }
+  const all = world === 'all';
+  const w = Number(world);
+  const steps = R.plan.map(s => s.actions.filter(a => all || !(a.skip_in_worlds || []).includes(w)));
+  const desc = all ? '' : ((R.worlds_init || [])[w - 1] || []).join(', ');
+  $('planTitle').textContent = all ? 'Rozwiązanie' : `Rozwiązanie — świat ${w}`;
+  $('plan').innerHTML = (desc ? `<p class="skip">${esc(desc)}</p>` : '') +
+    '<ol class="deg">' + steps.map(acts => '<li>' + (acts.length ? acts.map(a =>
+      `<code>${esc(a.action)}</code>` +
+      (all && a.skip_in_worlds ? ` <span class="skip">pomiń w ${a.skip_in_worlds.join(', ')}</span>` : '')
+    ).join('<br>') : '<span class="skip">(nic)</span>') + '</li>').join('') + '</ol>';
+}
 $('levels').innerHTML = '<table><tr><th>krok</th><th>graph-size<br>(akcje, propozycje)</th><th>mutex-count<br>(akcje, propozycje)</th></tr>' +
   R.steps.map(s => `<tr><td>${s.step}</td><td>(${s.graph_size.actions}, ${s.graph_size.propositions})</td><td>(${s.mutex_count.actions}, ${s.mutex_count.propositions})</td></tr>`).join('') + '</table>';
 $('times').innerHTML = '<table><tr><th>krok</th><th>time-expansion</th><th>time-bc</th><th>time-mutex</th></tr>' +
@@ -154,6 +165,7 @@ const shown = n => { const s = label(n); return s.length > M.MAXL ? s.slice(0, M
 function draw() {
   const showNoop = $('optNoop').checked, showMutex = $('optMutex').checked, onlyPlan = $('optPlan').checked;
   const world = $('optWorld').value;
+  renderPlan(world);
   const inWorld = n => world === 'all' || !n.ctx || n.ctx === world;
   M = $('optCompact').checked ? MODES.compact : MODES.normal;
   svg.classList.toggle('compact', M === MODES.compact);
