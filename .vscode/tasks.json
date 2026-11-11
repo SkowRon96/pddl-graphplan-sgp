@@ -29,6 +29,18 @@
       "problemMatcher": []
     },
     {
+      "label": "SGP: planuj wszystkie problemy z pliku",
+      "detail": "Każdy problem z aktywnego pliku po kolei -> results/<nazwa>-<problem>.json + tabela zbiorcza",
+      "type": "process",
+      "command": "sbcl",
+      "args": ["--script", "${workspaceFolder}/engine/run.lisp", "${file}", "all",
+               "--name", "${input:name}", "--levels", "${input:levels}"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
       "label": "SGP: lista problemów",
       "detail": "Problemy zdefiniowane w aktywnym pliku",
       "type": "process",

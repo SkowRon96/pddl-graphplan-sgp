@@ -81,6 +81,8 @@
   <label><input type="checkbox" id="optMutex" checked> pokaż wzajemne wykluczania (mutex)</label>
   <label><input type="checkbox" id="optPlan"> tylko rozwiązanie</label>
   <label title="Mniejsze węzły i skrócone etykiety (pełna nazwa po najechaniu myszą)"><input type="checkbox" id="optCompact"> wersja kompaktowa</label>
+  <label id="worldBox" hidden title="Pokaż węzły jednego świata możliwego (przy niepewności stanu początkowego)">świat:
+    <select id="optWorld"><option value="all">wszystkie</option></select></label>
   <span class="zoom" title="Ctrl/Cmd + kółko myszy: przybliżanie w miejscu kursora; klawisze + − 0; przeciąganie tła: przesuwanie">
     <button id="zOut" aria-label="Oddal">−</button><span id="zoomVal">100%</span><button id="zIn" aria-label="Przybliż">+</button>
     <button id="z100">100%</button><button id="zFit">Dopasuj</button>
@@ -151,6 +153,8 @@ const shown = n => { const s = label(n); return s.length > M.MAXL ? s.slice(0, M
 
 function draw() {
   const showNoop = $('optNoop').checked, showMutex = $('optMutex').checked, onlyPlan = $('optPlan').checked;
+  const world = $('optWorld').value;
+  const inWorld = n => world === 'all' || !n.ctx || n.ctx === world;
   M = $('optCompact').checked ? MODES.compact : MODES.normal;
   svg.classList.toggle('compact', M === MODES.compact);
   svg.innerHTML = '';
@@ -159,16 +163,16 @@ function draw() {
   // które węzły są widoczne
   const visible = new Set();
   G.forEach(l => l.actions.forEach(a => {
-    if ((a.noop && !showNoop) || (onlyPlan && !a.plan)) return;
+    if ((a.noop && !showNoop) || (onlyPlan && !a.plan) || !inWorld(a)) return;
     visible.add(a.id);
   }));
   G.forEach(l => l.props.forEach(p => {
-    if (!onlyPlan) { visible.add(p.id); return; }
+    if (!onlyPlan && inWorld(p)) { visible.add(p.id); return; }
   }));
   if (onlyPlan) {
     G.forEach(l => l.actions.forEach(a => { if (visible.has(a.id)) { a.pre.forEach(i => visible.add(i)); a.eff.forEach(i => visible.add(i)); } }));
     // cele i stan początkowy zawsze
-    G[0].props.forEach(p => visible.add(p.id));
+    G[0].props.forEach(p => { if (inWorld(p)) visible.add(p.id); });
   }
   // kolumny jak w PDDL.pdf: poziom 0 (propozycje), 1 (akcje), 2 (propozycje), ...
   const cols = [];
@@ -298,7 +302,18 @@ window.addEventListener('mousemove', e => {
 });
 window.addEventListener('mouseup', () => { drag = null; wrap.classList.remove('drag'); });
 
-['optNoop', 'optMutex', 'optPlan', 'optCompact'].forEach(i => $(i).addEventListener('change', draw));
+// filtr świata -- tylko gdy problem ma kilka światów możliwych
+if (R.worlds && R.worlds > 1) {
+  $('worldBox').hidden = false;
+  for (let w = 1; w <= R.worlds; w++) {
+    const o = document.createElement('option');
+    o.value = String(w);
+    const d = (R.worlds_init || [])[w - 1];
+    o.textContent = `${w}` + (d && d.length ? `: ${d.join(', ')}` : '');
+    $('optWorld').appendChild(o);
+  }
+}
+['optNoop', 'optMutex', 'optPlan', 'optCompact', 'optWorld'].forEach(i => $(i).addEventListener('change', draw));
 draw();
 </script>
 </body>

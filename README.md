@@ -17,11 +17,14 @@ do pliku JSON. Na życzenie rysuje też graf planowania.
 ## 1. Zawartość repozytorium
 
 ```
-gripper-example.pddl   przykłady z rozdz. 5 PDDL.pdf: gripper-1s, gripper-1t (prosty), gripper-2 (złożony)
-domains/               domeny PDDL z dystrybucji SGP 1.0h (rozdz. 8)
-engine/                planner SGP 1.0h (Common Lisp) i run.lisp (uruchamianie, statystyki, JSON, graf)
-results/               wyniki uruchomień: <nazwa>.json i <nazwa>.html
-.vscode/               zadania, ustawienia, rekomendowane rozszerzenie
+examples/certain/gripper.pddl   informacja pewna: przykłady z rozdz. 5 PDDL.pdf (gripper-1s, gripper-1t, gripper-2)
+examples/uncertain/bomb.pddl    informacja niepewna: bomba w toalecie (plan odporny i warunkowy)
+examples/uncertain/sick.pddl    informacja niepewna: chory pacjent (plan warunkowy)
+domains/certain/                domeny z pełną informacją o stanie początkowym (rozdz. 8)
+domains/uncertain/              domeny z niepewnym stanem początkowym (rozdz. 8)
+engine/                         planner SGP 1.0h (Common Lisp) i run.lisp (uruchamianie, statystyki, JSON, graf)
+results/                        wyniki uruchomień: <nazwa>.json i <nazwa>.html
+.vscode/                        zadania, ustawienia, rekomendowane rozszerzenie
 ```
 
 ## 2. Instalacja
@@ -50,7 +53,7 @@ Następnie:
      konstrukcje (np. kilka `define` w jednym pliku). Ignoruj te podkreślenia.
    - **Nie używaj Alt+P** („PDDL: Run the planner”), bo wysyła plik do
      zewnętrznego serwisu.
-4. Test: otwórz `gripper-example.pddl`, naciśnij **Ctrl+Shift+B**
+4. Test: otwórz `examples/certain/gripper.pddl`, naciśnij **Ctrl+Shift+B**
    (macOS: **Cmd+Shift+B**) i trzy razy Enter. W terminalu powinno
    pojawić się rozwiązanie problemu `gripper-1s` z 3 krokami.
 
@@ -81,13 +84,14 @@ Planner uruchamia się wyłącznie zadaniami z `.vscode/tasks.json`
 | ------------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
 | **SGP: planuj**           | planuje wybrany problem, wypisuje plan, zapisuje `results/<nazwa>.json`                              | **Ctrl+Shift+B** (wbudowany), **F5** (po konfiguracji poniżej) |
 | **SGP: planuj + graf**    | jak wyżej, dodatkowo zapisuje `results/<nazwa>.html` z rysunkiem grafu i otwiera go w przeglądarce | **Ctrl+F5** (po konfiguracji)                                         |
+| **SGP: planuj wszystkie problemy z pliku** | planuje kolejno każdy problem z pliku, zapisuje `results/<nazwa>-<problem>.json` i na końcu wypisuje tabelę zbiorczą (rozwiązanie, liczba światów, kroki, akcje, czasy) — wygodne przy serii problemów i badaniach | — |
 | **SGP: lista problemów** | wypisuje nazwy problemów zdefiniowanych w pliku                                                       | **Shift+F5** (po konfiguracji)                                        |
 
 Przy uruchomieniu VS Code zadaje pytania. Enter zatwierdza wartość domyślną.
 
 | Pytanie                        | Znaczenie                                                                        | Domyślnie                     |
 | ------------------------------ | -------------------------------------------------------------------------------- | ------------------------------ |
-| **problem**              | nazwa z `(define (problem X) ...)`                                             | pierwszy problem w pliku       |
+| **problem**              | nazwa z `(define (problem X) ...)`; `all` = wszystkie problemy z pliku         | pierwszy problem w pliku       |
 | **nazwa wyniku**         | nazwa pliku w `results/` (bez rozszerzenia); istniejący plik jest nadpisywany | `<problem>-<data>-<godzina>` |
 | **maks. liczba kroków** | limit kroków algorytmu, czyli maksymalna długość rozwiązania (rozdz. 7)     | 20                             |
 
@@ -133,6 +137,51 @@ Po każdym kroku planner **sprawdza osiągnięcie celu metodą backtracking**.
 Cel jest osiągnięty, gdy jego propozycje są na bieżącym poziomie i istnieje
 niewykluczająca się metoda ich osiągnięcia. Jeśli nie, wykonywany jest kolejny krok.
 
+### Niepewny stan początkowy: światy możliwe, plan odporny i warunkowy
+
+Gdy stan początkowy nie jest w pełni znany (operatory `oneof`, `uncertain`,
+`or` w `:init`, rozdz. 7), planner rozważa wszystkie **światy możliwe**
+(ang. *possible worlds*, w SGP *contexts*), czyli wszystkie stany zgodne
+z opisem. Liczby możliwości się mnożą: `oneof` z 3 faktami (3 światy)
+i `uncertain` (2 światy) dają razem 3 × 2 = 6 światów. Graf planowania
+jest budowany dla wszystkich światów naraz, a rozwiązanie musi osiągać cel
+w każdym z nich. Planer wybierany jest automatycznie: gdy problem zawiera
+niepewność albo akcje sensoryczne, działa Sensory Graphplan (SGP),
+w przeciwnym razie Graphplan (GP).
+
+| Rozwiązanie | Kiedy | Jak wygląda |
+| --- | --- | --- |
+| **plan klasyczny** (GP) | stan początkowy znany | ciąg kroków |
+| **plan odporny** (ang. *conformant*) | brak informacji o tym, w którym świecie jesteśmy | jeden ciąg kroków, poprawny w każdym świecie |
+| **plan warunkowy** (ang. *contingent*) | akcje sensoryczne (`observes`) pozwalają rozpoznać świat | część akcji jest wykonywana tylko w niektórych światach |
+
+W planie warunkowym zapis `dunk (pkg1, toilet1)   ; pomiń w światach 1 2 3 4`
+oznacza, że akcję wykonuje się wyłącznie w świecie 5. Wcześniejsze akcje
+sensoryczne pozwalają rozpoznać, w którym świecie jest agent. Dla planu
+warunkowego terminal wypisuje dodatkowo **rozwiązanie dla każdego świata**
+osobno, a na początku listę światów możliwych z faktami, którymi się różnią:
+
+```
+Światy możliwe (5) -- fakty, którymi się różnią:
+   1: in (pkg5), metal (pkg5)
+   …
+ROZWIĄZANIE (SGP, plan warunkowy), liczba kroków planu: 2
+  1°
+     detect-metal (pkg2)
+     …
+  2°
+     dunk (pkg1, toilet1)   ; pomiń w światach 1 2 3 4
+     …
+Rozwiązanie dla każdego świata:
+   1: 1° detect-metal (pkg2), …  |  2° dunk (pkg5, toilet1)
+```
+
+Jeśli plan odporny jest nie dłuższy niż warunkowy, SGP wybiera plan odporny,
+nawet gdy akcje sensoryczne są dostępne. Plan warunkowy powstaje dopiero
+wtedy, gdy działanie „na ślepo” nie prowadzi do celu, np. gdy toaleta zatyka
+się po każdym zanurzeniu paczki (`bt-1sa`) albo gdy lek na złą chorobę szkodzi
+(`sick`).
+
 ## 5. Statystyki SGP
 
 Po rozwiązaniu w terminalu pojawia się tabela, a te same dane trafiają do `results/<nazwa>.json`:
@@ -145,7 +194,7 @@ Po rozwiązaniu w terminalu pojawia się tabela, a te same dane trafiają do `re
 | **graph-size**     | liczba akcji (łącznie z no-op) i propozycji otrzymanych w danym kroku           | `graph_size.actions`, `graph_size.propositions`   |
 | **mutex-count**    | liczba wzajemnie wykluczających się relacji akcji i propozycji                  | `mutex_count.actions`, `mutex_count.propositions` |
 
-Przykład dla `gripper-1t` z `gripper-example.pddl`:
+Przykład dla `gripper-1t` z `examples/certain/gripper.pddl`:
 
 ```
 Krok  time-expansion    time-bc  time-mutex  graph-size          mutex-count
@@ -166,6 +215,8 @@ Uwagi:
   (A–B i B–A), tak jak SGP. Liczba par to połowa tej wartości.
 - **graph-size** zależy od zapisu domeny. Wersja STRIPS ma więcej propozycji
   niż wersja TYPING, bo typy obiektów są w niej propozycjami, np. `ball (ball1)`.
+- Przy niepewności **graph-size** liczy propozycje bez podziału na światy
+  (tak jak SGP), a akcje osobno w każdym świecie, więc rośnie razem z liczbą światów.
 
 Pozostałe pola `results/<nazwa>.json`:
 
@@ -176,13 +227,16 @@ Pozostałe pola `results/<nazwa>.json`:
 | `planner`                       | `gp` (Graphplan) lub `sgp` (Graphplan z niepewnością, wybierany automatycznie, gdy domena jej używa)             |
 | `max_steps`                     | limit kroków algorytmu                                                                                                 |
 | `solved`, `stop_reason`       | czy znaleziono rozwiązanie i dlaczego planner się zatrzymał (rozdz. 7)                                               |
+| `plan_type`                     | rodzaj rozwiązania: `classical` (plan klasyczny), `conformant` (plan odporny), `conditional` (plan warunkowy)         |
+| `worlds`, `worlds_init`         | liczba światów możliwych i fakty, którymi się różnią (tylko przy niepewności)                                        |
 | `warnings`                      | ostrzeżenia plannera                                                                                                   |
 | `plan_steps`, `plan_actions`  | liczba kroków rozwiązania i liczba akcji w rozwiązaniu                                                               |
 | `algorithm_steps`               | liczba wykonanych kroków algorytmu                                                                                     |
 | `initial_propositions`          | liczba propozycji na poziomie 0 (stan początkowy)                                                                      |
 | `time_ms`                       | sumy: `expansion`, `bc`, `mutex` oraz `total`                                                                   |
 | `steps[]`                       | statystyki każdego kroku (tabela wyżej) oraz `noops`, czyli liczba akcji no-op wliczonych do `graph_size.actions` |
-| `plan[]`                        | rozwiązanie: kolejne kroki (`step`) z listą akcji                                                                   |
+| `plan[]`                        | rozwiązanie: kolejne kroki (`step`) z listą akcji; w planie warunkowym `skip_in_worlds` = światy, w których akcję się pomija |
+| `plan_per_world[]`              | (plan warunkowy) rozwiązanie dla każdego świata osobno                                                                 |
 | `planner_output`                | tekst wypisany przez planner                                                                                            |
 
 Rozwiązanie jest **równoległe**: akcje w jednym kroku (np. `1°`) nie wykluczają
@@ -210,6 +264,9 @@ plik bez zewnętrznych bibliotek, który działa offline w każdej przeglądarce
   i wykluczenia, a resztę przyciemnia.
 - Przełącznik *tylko rozwiązanie* pokazuje same akcje rozwiązania i ich
   propozycje. Przydaje się przy dużych grafach, np. `gripper-2`.
+- Przy niepewności każdy węzeł ma numer świata, np. `in (pkg1) {3}`, a akcje
+  rozwiązania są zielone tylko w światach, w których są wykonywane. Lista
+  *świat* pozwala pokazać graf jednego świata, co znacznie go zmniejsza.
 - Panel boczny zawiera rozwiązanie, `graph-size` i `mutex-count` dla
   każdego kroku oraz czasy.
 
@@ -229,6 +286,10 @@ rozwiązania nie ma, terminal i pole `stop_reason` mówią dlaczego:
 - `BRAK PLANU: domena używa konstrukcji nieobsługiwanych przez SGP`
   (`unsupported`): patrz *Składnia* niżej.
 
+Przy niepewności (SGP) planner nie wykrywa wyrównania grafu: gdy rozwiązanie
+nie istnieje, zawsze liczy do limitu kroków (`level_limit`). Tak jest np.
+w `bt-dd3`, gdzie w jednym ze światów bomby w ogóle nie ma.
+
 **Czas.** Planner nie ma limitu czasu i liczy do skutku albo do przerwania
 klawiszami **Ctrl+C**. Czas rośnie bardzo szybko z liczbą obiektów i długością
 rozwiązania. Najbardziej rośnie **time-bc**, bo przeszukiwanie metodą
@@ -237,10 +298,18 @@ Apple M), w porównaniu z `PDDL.pdf` (Allegro CL, Intel Core 2 Duo, 2011):
 
 | Problem                                            | Kroki | Czas (SBCL) | Czas w `PDDL.pdf` |
 | -------------------------------------------------- | ----: | ----------: | ------------------: |
-| `gripper-example.pddl` / `gripper-1t`          |     3 |     ~0,1 ms |             0,408 s |
-| `gripper-example.pddl` / `gripper-2`           |     9 |      ~10 ms |            21,869 s |
-| `domains/gripper.pddl` / `gripper6` (6 piłek) |    11 |        ~2 s |                  — |
-| `domains/gripper.pddl` / `gripper8` (8 piłek) |    — |      > 30 s |                  — |
+| `examples/certain/gripper.pddl` / `gripper-1t`          |     3 |     ~0,1 ms |             0,408 s |
+| `examples/certain/gripper.pddl` / `gripper-2`           |     9 |      ~10 ms |            21,869 s |
+| `domains/certain/gripper.pddl` / `gripper6` (6 piłek) |    11 |        ~2 s |                  — |
+| `domains/certain/gripper.pddl` / `gripper8` (8 piłek) |    — |      > 30 s |                  — |
+
+Przy niepewności czas rośnie także z **liczbą światów możliwych**. Seria
+`sick-3-1ill` … `sick-3-5ill` z `examples/uncertain/sick.pddl` (1…5 światów,
+ten sam plan z 3 kroków):
+
+| Światy | 1 | 2 | 3 | 4 | 5 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Czas (SBCL) | ~0,04 ms | ~0,4 ms | ~2 ms | ~17 ms | ~170 ms |
 
 Do każdego uruchomienia dochodzi ok. 0,6 s na załadowanie plannera.
 
@@ -253,16 +322,37 @@ Do każdego uruchomienia dochodzi ok. 0,6 s na załadowanie plannera.
   liczby i funkcje, akcje ciągłe (*durational actions*) oraz negacje formuł
   złożonych (np. `(not (exists ...))`). Planner wypisuje wtedy
   `UWAGA: Planner is unlikely to work…`;
-- nierówność `(not (= ?x ?y))` umieszczaj na końcu warunku stosowalności.
+- nierówność `(not (= ?x ?y))` umieszczaj na końcu warunku stosowalności;
+- parametr akcji, który nie występuje w warunku stosowalności, jest wiązany
+  tylko wtedy, gdy domena deklaruje `:typing` (albo `:adl`).
+
+**Niepewność stanu początkowego** (`:init`) i akcje sensoryczne:
+
+| Konstrukcja | Znaczenie | Liczba światów |
+| --- | --- | --- |
+| `(oneof A B C)` | prawdziwy jest dokładnie jeden z faktów | 3 |
+| `(uncertain A)` | A może być prawdziwy albo fałszywy | 2 |
+| `(or A B)` | prawdziwy jest co najmniej jeden z faktów | 3 (A; B; A i B) |
+| `(iff A B)` | A jest prawdziwy wtedy i tylko wtedy, gdy B | nie dodaje światów, wiąże fakty |
+| `(observes P)` | efekt akcji sensorycznej: po jej wykonaniu wiadomo, czy P jest prawdziwe | — |
+
+Operatory można łączyć w jednym `:init`; liczba światów to wtedy iloczyn.
+W dziedzinach z niepewnością fakty fałszywe zapisuje się w `:init` jawnie,
+np. `(not (clogged))`, tak jak w przykładach z `examples/uncertain/`.
 
 ## 8. Domeny
 
-Pliki z dystrybucji SGP 1.0h. Każdy problem sprawdzono z limitem 30 kroków algorytmu
-i 30 s:
+Pliki pochodzą z dystrybucji SGP 1.0h. Każdy problem sprawdzono z limitem
+30 kroków algorytmu i 30 s:
 
 - **Rozwiązane**: plan znaleziony.
-- **Bez planu**: graf się wyrównał, więc planu nie ma (w MYSTERY część problemów
-  celowo nie ma rozwiązania), albo problem używa nieobsługiwanej konstrukcji.
+- **Bez planu**: graf się wyrównał (planu nie ma), osiągnięto limit kroków
+  albo problem używa nieobsługiwanej konstrukcji. W MYSTERY część problemów
+  celowo nie ma rozwiązania.
 - **> 30 s**: obliczenia trwały dłużej niż 30 s.
+
+### `domains/certain/` – pełna informacja o stanie początkowym
+
+### `domains/uncertain/` – niepewny stan początkowy
 
 SGP: Copyright (c) Mark Peot, 1995; University of Washington, 1997–2000 (`engine/SGP-README.txt`).

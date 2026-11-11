@@ -204,7 +204,7 @@
 
 
 (define (domain  mcd-blocksworld-axiom)
-    (:requirements :adl :domain-axioms :quantified-preconditions)
+    (:requirements :adl :quantified-preconditions)
 
   (:constants Table)
   (:predicates (on ?x ?y)
@@ -212,16 +212,15 @@
 	       (block ?b)
 	       (above ?x ?y))
 
-  (:axiom 
-	  :vars (?b ?x)
-	  :context (or (= ?x Table)
-		       (not (exists (?b) (on ?b ?x))))
-	  :implies (clear ?x))
-
+  ;; poprawka: SGP nie obsługuje :domain-axioms. Aksjomat
+  ;; (clear ?x) <= (or (= ?x Table) (not (exists (?b) (on ?b ?x))))
+  ;; wstawiony wprost do warunku puton (bez negacji formuły złożonej).
   (:action puton
 	     :parameters (?x ?y ?d)
 	     :precondition (and (not (= ?x ?y)) (not (= ?x table)) (not (= ?d ?y))
-				 (on ?x ?d) (clear ?x) (clear ?y))
+				 (on ?x ?d)
+				 (forall (?b) (not (on ?b ?x)))
+				 (or (= ?y Table) (forall (?b) (not (on ?b ?y)))))
 	     :effect
 	     (and (on ?x ?y) (not (on ?x ?d))
 		  (forall (?c)

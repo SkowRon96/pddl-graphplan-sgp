@@ -261,6 +261,12 @@
 ;;; ------------------------------------------------------------------
 ;;; Graf (dane do rysunku)
 
+(defun in-plan-p (label ctx entries)
+  "Czy akcja o etykiecie LABEL w świecie CTX należy do rozwiązania (nie jest w nim pomijana)."
+  (some (lambda (e) (and (string= label (car e))
+                         (not (and ctx (member ctx (cdr e))))))
+        entries))
+
 (defun graph-json (pg planner steps)
   (let* ((plevels (reverse (pcall planner "PG-PROPOSITION-LEVELS" pg)))
          (alevels (reverse (pcall planner "PG-ACTION-LEVELS" pg)))
@@ -276,9 +282,9 @@
             (loop for i from 0 to n
                   for props = (level-props (nth i plevels) planner)
                   for acts = (and (> i 0) (nth (1- i) alevels))
-                  for plan-labels = (let ((k (- i 1 offset)))
-                                      (and (> i 0) (>= k 0) (< k (length steps))
-                                           (mapcar #'car (nth k steps))))
+                  for plan-entries = (let ((k (- i 1 offset)))   ; (etykieta . światy-do-pominięcia)
+                                       (and (> i 0) (>= k 0) (< k (length steps))
+                                            (nth k steps)))
                   collect
                   `(:obj
                     ("level" . ,i)
@@ -293,7 +299,8 @@
                                                collect `(:obj ("id" . ,(id a))
                                                               ("label" . ,label)
                                                               ("noop" . ,(if (noop-p a planner) :true :false))
-                                                              ("plan" . ,(if (member label plan-labels :test #'string=) :true :false))
+                                                              ("plan" . ,(if (in-plan-p label (node-context a planner) plan-entries)
+                                                                             :true :false))
                                                               ,@(let ((c (node-context a planner)))
                                                                   (when c `(("ctx" . ,(str c)))))
                                                               ("pre" . (:arr ,@(mapcar #'id (action-pre a planner))))
@@ -389,17 +396,179 @@
 (defun safe-name (s)
   (map 'string (lambda (c) (if (or (alphanumericp c) (find c "-_.")) c #\_)) s))
 
-(defun print-plan (steps planner)
-  (format t "~&~%ROZWIĄZANIE (~A), liczba kroków planu: ~D~%"
-          (if (eq planner :sgp) "SGP, plan warunkowy" "GP") (length steps))
+;;; Typ rozwiązania: klasyczne (GP), odporne (SGP bez pomijania akcji),
+;;; warunkowe (SGP z akcjami pomijanymi w części światów).
+(defun plan-type (planner steps)
+  (cond ((eq planner :gp) "classical")
+        ((some (lambda (step) (some #'cdr step)) steps) "conditional")
+        (t "conformant")))
+
+(defun plan-type-pl (type)
+  (cond ((string= type "classical") "GP")
+        ((string= type "conditional") "SGP, plan warunkowy")
+        (t "SGP, plan odporny")))
+
+(defun negative-literal-p (l)
+  (and (consp l) (symbolp (car l)) (string= (symbol-name (car l)) "NOT")))
+
+(defun world-differences (worlds)
+  "Dla każdego świata: fakty, którymi różni się od pozostałych. Pokazywane są
+fakty pozytywne; negacje tylko wtedy, gdy świat nie ma innych różnic."
+  (let ((common (reduce (lambda (a b) (intersection a b :test #'equal)) worlds)))
+    (mapcar (lambda (w)
+              (let* ((d (reverse (remove-if (lambda (l) (member l common :test #'equal)) w)))
+                     (pos (remove-if #'negative-literal-p d)))
+                (or pos d)))
+            worlds)))
+
+(defun plan-for-world (steps w)
+  "Rozwiązanie liniowe dla świata W: akcje, które w tym świecie nie są pomijane."
+  (loop for step in steps
+        for acts = (loop for (label . skip) in step unless (member w skip) collect label)
+        when acts collect acts))
+
+(defun print-plan (steps type)
+  (format t "~&~%ROZWIĄZANIE (~A), liczba kroków planu: ~D~%" (plan-type-pl type) (length steps))
   (loop for step in steps for i from 1 do
     (format t "~3D°~%" i)
     (loop for (label . skip) in step do
       (format t "     ~A~@[   ; pomiń w światach ~{~A~^ ~}~]~%" label skip))))
 
+(defun print-worlds (diffs)
+  (format t "~&~%Światy możliwe (~D) -- fakty, którymi się różnią:~%" (length diffs))
+  (loop for d in diffs for w from 1 do
+    (format t "~4D: ~{~A~^, ~}~%" w (or (mapcar #'atom-label d) (list "(brak różnic)")))))
+
+(defun print-plans-per-world (per-world)
+  (format t "~&~%Rozwiązanie dla każdego świata:~%")
+  (loop for steps in per-world for w from 1 do
+    (format t "~4D: ~{~A~^  |  ~}~%" w
+            (loop for acts in steps for i from 1
+                  collect (format nil "~D° ~{~A~^, ~}" i acts)))))
+
 (defun usage ()
-  (format t "~&Użycie: sbcl --script engine/run.lisp <plik.pddl> [problem] [--name NAZWA] ~
+  (format t "~&Użycie: sbcl --script engine/run.lisp <plik.pddl> [problem|all] [--name NAZWA] ~
              [--graph] [--no-open] [--list] [--gp|--sgp] [--levels N] [--trace FLAGA]~%"))
+
+(defun run-problem (file psym &key name planner levels graph open trace)
+  "Uruchom planner dla jednego problemu, wypisz wynik, zapisz JSON (i graf).
+Zwraca plist z podsumowaniem."
+  (let* ((planner (or planner (planner-for psym)))
+         (pkg (if (eq planner :sgp) :sgp :gp))
+         (json-path (merge-pathnames (format nil "results/~A.json" name) *root*))
+         (html-path (merge-pathnames (format nil "results/~A.html" name) *root*))
+         (log (make-string-output-stream)))
+    (dolist (f trace)
+      (setf (symbol-value (find-symbol (format nil "*TRACE-GP-~A*" (string-upcase f)) pkg)) t))
+    (format t "~&~%========== ~(~A~) [~(~A~)] ==========~%" psym planner)
+    (setf *last-pg* nil *level-times* nil *current* nil)
+    (let* ((warnings '())
+           (t0 (now))
+           (plan (let ((*standard-output* (make-broadcast-stream *standard-output* log))
+                       (*package* (find-package pkg)))
+                   (handler-bind ((warning
+                                    (lambda (w)
+                                      (let ((msg (substitute #\Space #\Newline (princ-to-string w))))
+                                        (push msg warnings)
+                                        (format t "~&UWAGA: ~A~%" msg))
+                                      (muffle-warning w))))
+                     (pcall pkg "PLAN" psym :levels levels))))
+           (total (secs t0))
+           (steps (plan-steps plan planner))
+           (type (plan-type planner steps))
+           (stats (if *last-pg* (step-stats *last-pg* planner) nil))
+           (graph-levels (length stats))
+           (worlds (and (eq planner :sgp) *last-pg* (pcall :sgp "PG-WORLDS" *last-pg*)))
+           (diffs (and worlds (world-differences worlds)))
+           (per-world (and plan (string= type "conditional")
+                           (loop for w from 1 to (length worlds) collect (plan-for-world steps w))))
+           (stop (cond (plan "plan_found")
+                       ((>= graph-levels levels) "level_limit")
+                       ((null warnings) "leveled_off")
+                       (t "unsupported")))
+           (result
+             `(:obj
+               ("name" . ,name)
+               ("created" . ,(timestamp))
+               ("file" . ,(file-namestring file))
+               ("problem" . ,(str psym))
+               ("domain" . ,(str (dcall "PROBLEM-DOMAIN" (dcall "GET-PROBLEM" psym))))
+               ("planner" . ,(str planner))
+               ("max_steps" . ,levels)
+               ("solved" . ,(if plan :true :false))
+               ("stop_reason" . ,stop)
+               ("plan_type" . ,(if plan type :null))
+               ("warnings" . (:arr ,@(reverse warnings)))
+               ("plan_steps" . ,(length steps))
+               ("plan_actions" . ,(loop for s in steps sum (length s)))
+               ,@(when worlds
+                   `(("worlds" . ,(length worlds))
+                     ("worlds_init" . (:arr ,@(loop for d in diffs
+                                                    collect `(:arr ,@(mapcar #'atom-label d)))))))
+               ("algorithm_steps" . ,graph-levels)
+               ("initial_propositions" . ,(if *last-pg*
+                                              (length (car (last (pcall planner "PG-PROPOSITION-LEVELS" *last-pg*))))
+                                              0))
+               ("time_ms" . (:obj
+                             ("expansion" . ,(ms (loop for x in stats sum (getf x :time-expansion))))
+                             ("bc" . ,(ms (loop for x in stats sum (getf x :time-bc))))
+                             ("mutex" . ,(ms (loop for x in stats sum (getf x :time-mutex))))
+                             ("total" . ,(ms total))))
+               ("steps" . (:arr ,@(mapcar #'step-json stats)))
+               ("plan" . (:arr ,@(plan-json steps)))
+               ,@(when per-world
+                   `(("plan_per_world" .
+                      (:arr ,@(loop for pw in per-world for w from 1
+                                    collect `(:obj ("world" . ,w)
+                                                   ("plan" . (:arr ,@(loop for acts in pw
+                                                                           collect `(:arr ,@acts))))))))))
+               ("planner_output" . ,(get-output-stream-string log))
+               ("sbcl" . ,(lisp-implementation-version)))))
+      (when (and diffs (> (length diffs) 1)) (print-worlds diffs))
+      (cond (plan (print-plan steps type))
+            ((string= stop "unsupported")
+             (format t "~&~%BRAK PLANU: domena używa konstrukcji nieobsługiwanych przez SGP (patrz UWAGA).~%"))
+            ((string= stop "level_limit")
+             (format t "~&~%BRAK PLANU: osiągnięto limit ~D kroków algorytmu. Plan może istnieć ~
+                        przy większym limicie.~%" levels))
+            (t (format t "~&~%BRAK PLANU: graf się wyrównał po ~D krokach algorytmu, ~
+                          plan nie istnieje.~%" graph-levels)))
+      (when per-world (print-plans-per-world per-world))
+      (print-stats stats)
+      (format t "~&Czas: ~A, kroki algorytmu: ~D~%" (human-time total) graph-levels)
+      (ensure-directories-exist json-path)
+      (with-open-file (out json-path :direction :output :if-exists :supersede)
+        (json result out) (terpri out))
+      (format t "Wynik: ~A~%" (sb-ext:native-namestring json-path))
+      (when (and graph *last-pg*)
+        (write-graph-html html-path result (graph-json *last-pg* planner steps))
+        (format t "Graf:  ~A~%" (sb-ext:native-namestring html-path))
+        (when open (open-in-browser html-path)))
+      (list :problem (str psym) :solved plan :stop stop
+            :type (if plan (plan-type-pl type) "—")
+            :worlds (if worlds (length worlds) 1)
+            :plan-steps (length steps) :actions (loop for s in steps sum (length s))
+            :expansion (loop for x in stats sum (getf x :time-expansion))
+            :bc (loop for x in stats sum (getf x :time-bc))
+            :total total))))
+
+(defun print-summary (rows)
+  (format t "~&~%==================== PODSUMOWANIE ====================~%")
+  (format t "~&~18A ~20A ~7@A ~6@A ~6@A ~14@A ~10@A ~12@A~%"
+          "problem" "rozwiązanie" "światy" "kroki" "akcje" "time-expansion" "time-bc" "czas")
+  (dolist (r rows)
+    (format t "~&~18A ~20A ~7@A ~6@A ~6@A ~14@A ~10@A ~12@A~%"
+            (getf r :problem)
+            (if (getf r :solved) (getf r :type)
+                (cond ((equal (getf r :stop) "level_limit") "brak (limit kroków)")
+                      ((equal (getf r :stop) "unsupported") "brak (nieobsługiwane)")
+                      ((equal (getf r :stop) "error") "BŁĄD")
+                      (t "brak planu")))
+            (getf r :worlds)
+            (if (getf r :solved) (getf r :plan-steps) "—")
+            (if (getf r :solved) (getf r :actions) "—")
+            (human-time (or (getf r :expansion) 0)) (human-time (or (getf r :bc) 0))
+            (human-time (or (getf r :total) 0)))))
 
 (defun main (args)
   (let (file problem name graph (open t) list-only planner (levels 20) trace)
@@ -425,94 +594,36 @@
               (t (format t "Nieznany argument: ~A~%" a) (usage) (return-from main 2)))))
     (unless file (usage) (return-from main 2))
     (unless (probe-file file) (format t "Brak pliku: ~A~%" file) (return-from main 2))
-    (let ((problems (problems-in-file file)))
+    (let ((problems (problems-in-file file))
+          (stamp (remove #\: (substitute #\- #\T (timestamp)))))
       (format t "Plik: ~A~%Problemy: ~{~(~A~)~^, ~}~%" (file-namestring file) problems)
       (when list-only (return-from main 0))
       (when (null problems) (format t "W pliku nie ma (define (problem ...)).~%") (return-from main 1))
       (load-domain-file file)
-      (let* ((psym (if problem
-                       (or (find-symbol (string-upcase problem) :domains)
-                           (progn (format t "Nie ma problemu ~A w pliku.~%" problem)
-                                  (return-from main 2)))
-                       (first problems)))
-             (planner (or planner (planner-for psym)))
-             (pkg (if (eq planner :sgp) :sgp :gp))
-             (name (safe-name (or name (format nil "~(~A~)-~A" psym
-                                               (remove #\: (substitute #\- #\T (timestamp)))))))
-             (json-path (merge-pathnames (format nil "results/~A.json" name) *root*))
-             (html-path (merge-pathnames (format nil "results/~A.html" name) *root*))
-             (log (make-string-output-stream)))
-        (dolist (f trace)
-          (setf (symbol-value (find-symbol (format nil "*TRACE-GP-~A*" (string-upcase f)) pkg)) t))
-        (format t "~&~%========== ~(~A~) [~(~A~)] ==========~%" psym planner)
-        (setf *last-pg* nil *level-times* nil *current* nil)
-        (let* ((warnings '())
-               (t0 (now))
-               (plan (let ((*standard-output* (make-broadcast-stream *standard-output* log))
-                           (*package* (find-package pkg)))
-                       (handler-bind ((warning
-                                        (lambda (w)
-                                          (let ((msg (substitute #\Space #\Newline (princ-to-string w))))
-                                            (push msg warnings)
-                                            (format t "~&UWAGA: ~A~%" msg))
-                                          (muffle-warning w))))
-                         (pcall pkg "PLAN" psym :levels levels))))
-               (total (secs t0))
-               (steps (plan-steps plan planner))
-               (stats (if *last-pg* (step-stats *last-pg* planner) nil))
-               (graph-levels (length stats))
-               (stop (cond (plan "plan_found")
-                           ((>= graph-levels levels) "level_limit")
-                           ((null warnings) "leveled_off")
-                           (t "unsupported")))
-               (result
-                 `(:obj
-                   ("name" . ,name)
-                   ("created" . ,(timestamp))
-                   ("file" . ,(file-namestring file))
-                   ("problem" . ,(str psym))
-                   ("domain" . ,(str (dcall "PROBLEM-DOMAIN" (dcall "GET-PROBLEM" psym))))
-                   ("planner" . ,(str planner))
-                   ("max_steps" . ,levels)
-                   ("solved" . ,(if plan :true :false))
-                   ("stop_reason" . ,stop)
-                   ("warnings" . (:arr ,@(reverse warnings)))
-                   ("plan_steps" . ,(length steps))
-                   ("plan_actions" . ,(loop for s in steps sum (length s)))
-                   ,@(when (and (eq planner :sgp) *last-pg*)
-                       `(("worlds" . ,(pcall :sgp "PG-CONTEXTS" *last-pg*))))
-                   ("algorithm_steps" . ,graph-levels)
-                   ("initial_propositions" . ,(if *last-pg*
-                                                  (length (car (last (pcall planner "PG-PROPOSITION-LEVELS" *last-pg*))))
-                                                  0))
-                   ("time_ms" . (:obj
-                                 ("expansion" . ,(ms (loop for x in stats sum (getf x :time-expansion))))
-                                 ("bc" . ,(ms (loop for x in stats sum (getf x :time-bc))))
-                                 ("mutex" . ,(ms (loop for x in stats sum (getf x :time-mutex))))
-                                 ("total" . ,(ms total))))
-                   ("steps" . (:arr ,@(mapcar #'step-json stats)))
-                   ("plan" . (:arr ,@(plan-json steps)))
-                   ("planner_output" . ,(get-output-stream-string log))
-                   ("sbcl" . ,(lisp-implementation-version)))))
-          (cond (plan (print-plan steps planner))
-                ((string= stop "unsupported")
-                 (format t "~&~%BRAK PLANU: domena używa konstrukcji nieobsługiwanych przez SGP (patrz UWAGA).~%"))
-                ((string= stop "level_limit")
-                 (format t "~&~%BRAK PLANU: osiągnięto limit ~D kroków algorytmu. Plan może istnieć ~
-                            przy większym limicie.~%" levels))
-                (t (format t "~&~%BRAK PLANU: graf się wyrównał po ~D krokach algorytmu, ~
-                              plan nie istnieje.~%" graph-levels)))
-          (print-stats stats)
-          (format t "~&Czas: ~A, kroki algorytmu: ~D~%" (human-time total) graph-levels)
-          (ensure-directories-exist json-path)
-          (with-open-file (out json-path :direction :output :if-exists :supersede)
-            (json result out) (terpri out))
-          (format t "Wynik: ~A~%" (sb-ext:native-namestring json-path))
-          (when (and graph *last-pg*)
-            (write-graph-html html-path result (graph-json *last-pg* planner steps))
-            (format t "Graf:  ~A~%" (sb-ext:native-namestring html-path))
-            (when open (open-in-browser html-path)))
-          (if plan 0 1))))))
+      (if (and problem (string-equal problem "all"))
+          ;; wszystkie problemy z pliku po kolei + tabela zbiorcza
+          (let ((rows '()))
+            (dolist (p problems)
+              (let ((nm (safe-name (format nil "~A-~(~A~)" (or name stamp) p))))
+                (push (handler-case
+                          (run-problem file p :name nm :planner planner :levels levels
+                                              :graph graph :open nil :trace trace)
+                        (error (e)
+                          (format t "~&BŁĄD w ~(~A~): ~A~%" p e)
+                          (list :problem (str p) :stop "error" :worlds "—")))
+                      rows)))
+            (print-summary (nreverse rows))
+            0)
+          (let ((psym (if problem
+                          (or (find-symbol (string-upcase problem) :domains)
+                              (progn (format t "Nie ma problemu ~A w pliku.~%" problem)
+                                     (return-from main 2)))
+                          (first problems))))
+            (if (getf (run-problem file psym
+                                   :name (safe-name (or name (format nil "~(~A~)-~A" psym stamp)))
+                                   :planner planner :levels levels :graph graph :open open :trace trace)
+                      :solved)
+                0 1))))))
 
 (sb-ext:exit :code (handler-case (main (rest sb-ext:*posix-argv*))
                      (sb-sys:interactive-interrupt () 130)

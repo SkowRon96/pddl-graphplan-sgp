@@ -361,7 +361,7 @@
 ;; the conditional effect.
 
 (define (DOMAIN LOGISTICS-ADL)
-  (:requirements :adl :domain-axioms)
+  (:requirements :adl) ; poprawka: usunięto :domain-axioms (dziedzina nie ma aksjomatów)
   (:types physobj - object
 	  obj vehicle - physobj
 	  truck airplane - vehicle
