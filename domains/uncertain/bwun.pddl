@@ -1,3 +1,5 @@
+(in-package :domains)
+
 (define (domain galuszka1)
   (:requirements :strips :uncertainty :typing :conditional-effects)
   (:predicates (on ?x ?y)
